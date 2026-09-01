@@ -9,7 +9,7 @@ const API_HOSTNAME = process.env.API_HOSTNAME;
 const APP_HOSTNAME = process.env.APP_HOSTNAME;
 const REDIRECT_URI = `${API_HOSTNAME}/oidc/callback`;
 
-const getGoogleOIDCClient = async () => {
+export const getGoogleOIDCClient = async () => {
   const googleIssuer = await Issuer.discover("https://accounts.google.com");
   return new googleIssuer.Client({
     client_id: process.env.GOOGLE_CLIENT_ID,
@@ -42,6 +42,8 @@ export const Google = async (req: express.Request, res: express.Response) => {
     // which is stored in the session cookie.
     code_challenge,
     code_challenge_method: "S256",
+    access_type: "offline",
+    prompt: "consent",
   });
   return res.redirect(authorizationUrl);
 };
@@ -99,6 +101,7 @@ export const Callback = async (req: express.Request, res: express.Response) => {
   }
 
   req.session!.id_token = tokenSet.id_token;
+  req.session!.refresh_token = tokenSet.refresh_token || null;
 
   await prisma.user.upsert({
     where: { googleId: tokenClaims.sub },
