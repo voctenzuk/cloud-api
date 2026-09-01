@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { type NextFunction, type Request, type Response } from "express";
 import * as jose from "jose";
 import { UnauthorizedError } from "./errors";
+import { getGoogleOIDCClient } from "./oidc";
 
 const ALLOWED_IDENTITIES = process.env.ALLOWED_IDENTITIES?.split(",")
     .map((identity) => identity.trim().toLowerCase())
@@ -38,11 +39,55 @@ export const verifyToken = async (idToken: string) => {
   }
 };
 
+/**
+ * Refresh the Google id_token using the stored refresh_token.
+ * Returns the new id_token if successful, null otherwise.
+ */
+export const refreshIdToken = async (session: any): Promise<string | null> => {
+  const refreshToken = session?.refresh_token;
+  if (!refreshToken) {
+    console.log("[Auth] No refresh_token in session, cannot refresh");
+    return null;
+  }
+
+  try {
+    console.log("[Auth] Attempting to refresh id_token...");
+    const client = await getGoogleOIDCClient();
+    const tokenSet = await client.refresh(refreshToken);
+
+    if (tokenSet.id_token) {
+      // Update session with fresh tokens
+      session.id_token = tokenSet.id_token;
+      if (tokenSet.refresh_token) {
+        session.refresh_token = tokenSet.refresh_token;
+      }
+      console.log("[Auth] Successfully refreshed id_token");
+      return tokenSet.id_token;
+    }
+
+    console.log("[Auth] Refresh did not return a new id_token");
+    return null;
+  } catch (e) {
+    console.error("[Auth] Failed to refresh id_token:", e);
+    return null;
+  }
+};
+
 export const authenticated = async (req: Request, res: Response, next: NextFunction) => {
-  const idToken = req.session?.id_token;
+  let idToken = req.session?.id_token;
   if (!idToken) throw new UnauthorizedError();
 
-  const payload = await verifyToken(idToken);
+  let payload = await verifyToken(idToken);
+
+  // If verification failed (likely expired), try refreshing
+  if (!payload && req.session?.refresh_token) {
+    const newToken = await refreshIdToken(req.session);
+    if (newToken) {
+      idToken = newToken;
+      payload = await verifyToken(newToken);
+    }
+  }
+
   if (!payload) throw new UnauthorizedError();
   if (!payload.exp) throw new UnauthorizedError();
 

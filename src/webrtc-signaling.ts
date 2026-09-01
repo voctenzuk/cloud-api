@@ -153,9 +153,13 @@ async function authenticateDeviceRequest(req: IncomingMessage) {
 // Setup the device WebSocket after authentication
 function setupDeviceWebSocket(deviceWs: WebSocket, device: Device, req: IncomingMessage) {
   const id = device.id;
-  const ip =
-    (process.env.REAL_IP_HEADER && req.headers[process.env.REAL_IP_HEADER]) ||
+  // Node lowercases incoming header names, so the configured header must be
+  // lowercased too. X-Forwarded-For may hold a list; the client IP is first.
+  const rawIp =
+    (process.env.REAL_IP_HEADER &&
+      req.headers[process.env.REAL_IP_HEADER.toLowerCase()]) ||
     req.socket.remoteAddress;
+  const ip = (Array.isArray(rawIp) ? rawIp[0] : rawIp)?.split(",")[0].trim();
 
   const deviceVersion = (req.headers["x-app-version"] as string | undefined) || null;
   const rawSku = req.headers["x-device-sku"];
